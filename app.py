@@ -127,8 +127,8 @@ if uploaded_file is not None:
             if m:
                 balk_code = m.group(1)
                 q = float(m.group(2))
-                afstand = float(m.group(4))
-                lengte = float(m.group(5))
+                afstand = float(m.group(4)) if m.group(4) != '' else 0.0
+                lengte = float(m.group(5)) if m.group(5) != '' else 0.0
                 load_cases[current_bg].append({'balk': balk_code, 'q': q, 'afstand': afstand, 'lengte': lengte})
 
     selected_bg = st.selectbox("Selecteer Load Case (B.G.)", list(load_cases.keys()))
@@ -185,17 +185,19 @@ if uploaded_file is not None:
 
         last_start = ld['afstand']
         last_end = last_start + ld['lengte'] if ld['lengte'] != 0 else last_start + 0.01
+        length = last_end - last_start
 
         # 20 punten over de last
         n_points = 20
-        x_vals = [x0 + ((last_start + i*(last_end-last_start)/n_points)/ld['lengte']) * (x1-x0) for i in range(n_points+1)]
-        y_vals = [y0 + ((last_start + i*(last_end-last_start)/n_points)/ld['lengte']) * (y1-y0) for i in range(n_points+1)]
+        x_vals = [x0 + ((last_start + i*length/n_points)/length) * (x1-x0) for i in range(n_points+1)]
+        y_vals = [y0 + ((last_start + i*length/n_points)/length) * (y1-y0) for i in range(n_points+1)]
         z_vals = [-ld['q']*scaling]*len(x_vals)
 
         fig.add_trace(go.Scatter3d(
             x=x_vals, y=y_vals, z=z_vals,
-            mode='lines',
+            mode='lines+markers',
             line=dict(color='red', width=6),
+            marker=dict(size=4, color='red'),
             name=f"Load {ld['balk']}",
             showlegend=False
         ), row=1, col=2)
