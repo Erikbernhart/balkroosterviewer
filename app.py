@@ -4,14 +4,12 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 st.set_page_config(layout="wide", page_title="Spanningen en Structuur")
+st.title("Vergelijking Spanningen, Structuur en Belastingen")
 
-st.title("Vergelijking Spanningen en Structuur")
-
-# === Bestand uploaden ===
 uploaded_file = st.file_uploader("Upload fundering_nieuwV3.txt", type=["txt"])
 
 if uploaded_file is not None:
-    # === Bestand inlezen met fallback encoding ===
+    # === Bestand lezen met fallback encoding ===
     def read_file_with_fallback_encoding(file):
         encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1', 'windows-1252']
         for encoding in encodings:
@@ -21,18 +19,14 @@ if uploaded_file is not None:
                 return lines
             except UnicodeDecodeError:
                 continue
-        # fallback
         lines = file.getvalue().decode('utf-8', errors='ignore').splitlines()
         return lines
 
     lines = read_file_with_fallback_encoding(uploaded_file)
 
-    # === Data containers ===
+    # === STRAMIENLIJNEN & BALKEN PARSEN ===
     stramienlijnen = {}
     balken = []
-    ground_stress_data = {}
-
-    # === STRAMIENLIJNEN PARSEN ===
     in_stramien = False
     for line in lines:
         if "STRAMIENLIJNEN" in line:
@@ -47,7 +41,6 @@ if uploaded_file is not None:
                 x1, y1, x2, y2 = map(float, match.groups()[1:])
                 stramienlijnen[naam] = [(x1, y1), (x2, y2)]
 
-    # === BALKEN PARSEN ===
     in_balken = False
     for line in lines:
         if "BALKEN" in line and "vervolg" not in line:
@@ -60,7 +53,7 @@ if uploaded_file is not None:
             if match:
                 balken.append((match.group(1), match.group(2)))
 
-    # === Functies voor coördinaten ===
+    # === COORDINATEN FUNCTIES ===
     def get_beam_coord(code):
         lijn_naam, pos_str = code.split(';')
         i = int(pos_str)
@@ -73,14 +66,16 @@ if uploaded_file is not None:
         x, y = get_beam_coord(code)
         return (x, y, 0)
 
-    # === Ground stress parser ===
+    # === GROUND STRESS PARSEN ===
+    ground_stress_data = {}
+
     def parse_ground_stress():
-        in_displacement_section = False
-        for i, line in enumerate(lines):
+        in_disp = False
+        for line in lines:
             if "TUSSENPUNTEN VERPLAATSINGEN" in line and "Fundamentele combinatie" in line:
-                in_displacement_section = True
+                in_disp = True
                 continue
-            if in_displacement_section and ("REACTIES" in line or "BELASTINGCOMBINATIES" in line):
+            if in_disp and ("REACTIES" in line or "BELASTINGCOMBINATIES" in line):
                 break
             match = re.match(r"\s*(\d+)\s+(\d+)\s+([\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([\d.]+)", line)
             if match:
@@ -91,17 +86,42 @@ if uploaded_file is not None:
                     b_start, b_end = balken[beam_num - 1]
                     x1, y1 = get_beam_coord(b_start)
                     x2, y2 = get_beam_coord(b_end)
-                    ratio = position / 10  # vereenvoudigd
+                    ratio = position / 10
                     x = x1 + ratio * (x2 - x1)
                     y = y1 + ratio * (y2 - y1)
                     ground_stress_data[f"Beam{beam_num}_{position}"] = {'x': x, 'y': y, 'z': ground_stress, 'beam': beam_num}
 
     parse_ground_stress()
 
-    # === 3D PLOT: Ground Stress ===
-    fig_stress = go.Figure()
-    beam_colors = ['#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3', '#54A0FF', '#5F27CD', '#00D2D3']
+    # === LOADS PARSEN ===
+    loads_data = []
 
+    in_loads = False
+    for line in lines:
+        if "VELDBELASTINGEN" in line:
+            in_loads = True
+            continue
+        if in_loads and line.strip() == "":
+            in_loads = False
+        if in_loads:
+            # Bijvoorbeeld: Balk 1:1   1 1:q-last   -31.200  -31.200    0.000    6.855  0.000
+            match = re.match(r"Balk (\d+:\d+)\s+\d+\s+\S+\s+([-\d.]+)\s+([-\d.]*)\s+([-\d.]+)\s+([-\d.]+)", line)
+            if match:
+                balk_code = match.group(1)
+                q = float(match.group(2))
+                afstand = float(match.group(4))
+                lengte = float(match.group(5))
+                loads_data.append({'balk': balk_code, 'q': q, 'afstand': afstand, 'lengte': lengte})
+
+    # === 3D PLOT ===
+    fig = make_subplots(
+        rows=1, cols=2,
+        specs=[[{"type": "scene"}, {"type": "scene"}]],
+        subplot_titles=("Ground Stress", "Structuur & Loads")
+    )
+
+    # === Ground Stress ===
+    beam_colors = ['#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3', '#54A0FF', '#5F27CD', '#00D2D3']
     beams_data = {}
     for d in ground_stress_data.values():
         b = d['beam']
@@ -110,80 +130,61 @@ if uploaded_file is not None:
         beams_data[b]['x'].append(d['x'])
         beams_data[b]['y'].append(d['y'])
         beams_data[b]['z'].append(d['z'])
-
     for beam_num, data in beams_data.items():
         color = beam_colors[(beam_num - 1) % len(beam_colors)]
-        fig_stress.add_trace(go.Scatter3d(
+        fig.add_trace(go.Scatter3d(
             x=data['x'], y=data['y'], z=data['z'],
             mode='lines+markers',
             name=f"Beam {beam_num} Stress",
             line=dict(width=6, color=color),
             marker=dict(size=3, color=color),
-            hovertemplate='Beam %{text}<br>Stress: %{z:.1f} kN/m²<extra></extra>'
-        ))
+            showlegend=True
+        ), row=1, col=1)
 
-    # === 3D STRUCTUURPLOT ===
-    fig_structure = go.Figure()
+    # === Structuurplot ===
     for i, (b_start, b_end) in enumerate(balken):
         x0, y0, z0 = get_coord_3d(b_start)
         x1, y1, z1 = get_coord_3d(b_end)
-        fig_structure.add_trace(go.Scatter3d(
+        fig.add_trace(go.Scatter3d(
             x=[x0, x1], y=[y0, y1], z=[z0, z1],
             mode='lines',
             name=f"Balk {i+1}",
             line=dict(width=4, color='steelblue'),
-            hovertemplate=f"<b>Balk {i+1}</b><br>{b_start} → {b_end}<extra></extra>"
-        ))
+            showlegend=True
+        ), row=1, col=2)
 
-    points = set(sum(balken, ()))
-    node_x, node_y, node_z, node_labels = [], [], [], []
-    for p in sorted(points):
-        x, y, z = get_coord_3d(p)
-        node_x.append(x)
-        node_y.append(y)
-        node_z.append(z)
-        node_labels.append(p)
-    fig_structure.add_trace(go.Scatter3d(
-        x=node_x, y=node_y, z=node_z,
-        mode='markers+text',
-        name="Knopen",
-        marker=dict(size=6, color='darkred'),
-        text=node_labels,
-        textposition="top center",
-        textfont=dict(size=10),
-    ))
+    # === Loads toevoegen ===
+    for ld in loads_data:
+        balk_idx = int(ld['balk'].split(':')[0]) - 1
+        b_start, b_end = balken[balk_idx]
+        x0, y0 = get_beam_coord(b_start)
+        x1, y1 = get_beam_coord(b_end)
+        ratio = ld['afstand'] / ld['lengte'] if ld['lengte'] != 0 else 0
+        x = x0 + ratio * (x1 - x0)
+        y = y0 + ratio * (y1 - y0)
+        z = -ld['q']  # Naar boven negatief
+        fig.add_trace(go.Scatter3d(
+            x=[x], y=[y], z=[z],
+            mode='markers',
+            marker=dict(size=5, color='red'),
+            name=f"Load {ld['balk']}",
+            showlegend=True
+        ), row=1, col=2)
 
-    # === COMBINEER DE TWEE PLOTS NAAST ELKAAR ===
-    fig_combined = make_subplots(
-        rows=1, cols=2,
-        specs=[[{"type": "scene"}, {"type": "scene"}]],
-        subplot_titles=("Ground Stress", "Structuurmodel")
-    )
-
-    for trace in fig_stress.data:
-        trace.showlegend = True
-        fig_combined.add_trace(trace, row=1, col=1)
-
-    for trace in fig_structure.data:
-        trace.showlegend = True
-        fig_combined.add_trace(trace, row=1, col=2)
-
+    # === Layout ===
     shared_camera = dict(eye=dict(x=1.4, y=1.4, z=1.2))
-    fig_combined.update_layout(
+    fig.update_layout(
         height=700, width=1400,
-        title_text="Vergelijking Spanningen en Structuur",
         scene=dict(
-            xaxis=dict(title="X (m)", showgrid=False, zeroline=False, showline=False),
-            yaxis=dict(title="Y (m)", showgrid=False, zeroline=False, showline=False),
-            zaxis=dict(title="Ground Stress (kN/m²)", showgrid=False, zeroline=False, showline=False),
-            bgcolor='rgba(0,0,0,0)',
+            xaxis=dict(title="X (m)"),
+            yaxis=dict(title="Y (m)"),
+            zaxis=dict(title="Stress (kN/m²)"),
             camera=shared_camera
         ),
         scene2=dict(
-            xaxis=dict(title="X (m)", showgrid=False, zeroline=False, showline=False),
-            yaxis=dict(title="Y (m)", showgrid=False, zeroline=False, showline=False),
-            zaxis=dict(title="Z (m)", showgrid=False, zeroline=False, showline=False),
-            bgcolor='rgba(0,0,0,0)',
+            xaxis=dict(title="X (m)"),
+            yaxis=dict(title="Y (m)"),
+            zaxis=dict(title="Z (m)"),
             camera=shared_camera
         ),
         legend=dict(
@@ -193,5 +194,4 @@ if uploaded_file is not None:
         )
     )
 
-    # === Toon in Streamlit ===
-    st.plotly_chart(fig_combined, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True)
