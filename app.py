@@ -3,7 +3,7 @@ import re
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(layout="wide", page_title="Spanningen en Structuur")
+st.set_page_config(layout="wide", page_title="Spanningen en Structuur met Belastingen")
 st.title("Vergelijking Spanningen, Structuur en Belastingen")
 
 uploaded_file = st.file_uploader("Upload fundering_nieuwV3.txt", type=["txt"])
@@ -93,25 +93,34 @@ if uploaded_file is not None:
 
     parse_ground_stress()
 
-    # === LOADS PARSEN ===
-    loads_data = []
-
+    # === LOAD CASES PARSEN ===
+    load_cases = {}
+    current_bg = None
     in_loads = False
     for line in lines:
-        if "VELDBELASTINGEN" in line:
-            in_loads = True
+        if line.startswith("VELDBELASTINGEN"):
+            # Bijvoorbeeld: VELDBELASTINGEN  B.G:1 Permanent
+            m = re.match(r"VELDBELASTINGEN\s+B\.G:(\d+)", line)
+            if m:
+                current_bg = f"BG{m.group(1)}"
+                load_cases[current_bg] = []
+                in_loads = True
             continue
         if in_loads and line.strip() == "":
             in_loads = False
-        if in_loads:
-            # Bijvoorbeeld: Balk 1:1   1 1:q-last   -31.200  -31.200    0.000    6.855  0.000
-            match = re.match(r"Balk (\d+:\d+)\s+\d+\s+\S+\s+([-\d.]+)\s+([-\d.]*)\s+([-\d.]+)\s+([-\d.]+)", line)
-            if match:
-                balk_code = match.group(1)
-                q = float(match.group(2))
-                afstand = float(match.group(4))
-                lengte = float(match.group(5))
-                loads_data.append({'balk': balk_code, 'q': q, 'afstand': afstand, 'lengte': lengte})
+            current_bg = None
+        if in_loads and current_bg:
+            # Parse balk last regel
+            m = re.match(r"Balk (\d+:\d+)\s+\d+\s+\S+\s+([-\d.]+)\s+([-\d.]*)\s+([-\d.]+)\s+([-\d.]+)", line)
+            if m:
+                balk_code = m.group(1)
+                q = float(m.group(2))
+                afstand = float(m.group(4))
+                lengte = float(m.group(5))
+                load_cases[current_bg].append({'balk': balk_code, 'q': q, 'afstand': afstand, 'lengte': lengte})
+
+    # === Load case selectie ===
+    selected_bg = st.selectbox("Selecteer Load Case (B.G.)", list(load_cases.keys()))
 
     # === 3D PLOT ===
     fig = make_subplots(
@@ -153,22 +162,25 @@ if uploaded_file is not None:
             showlegend=True
         ), row=1, col=2)
 
-    # === Loads toevoegen ===
-    for ld in loads_data:
+    # === Loads toevoegen als lijnen ===
+    scaling = 0.1  # schaalfactor voor z
+    for ld in load_cases[selected_bg]:
         balk_idx = int(ld['balk'].split(':')[0]) - 1
         b_start, b_end = balken[balk_idx]
         x0, y0 = get_beam_coord(b_start)
         x1, y1 = get_beam_coord(b_end)
-        ratio = ld['afstand'] / ld['lengte'] if ld['lengte'] != 0 else 0
-        x = x0 + ratio * (x1 - x0)
-        y = y0 + ratio * (y1 - y0)
-        z = -ld['q']  # Naar boven negatief
+        # Zet start en eind van last over balk
+        start_ratio = ld['afstand'] / ld['lengte'] if ld['lengte'] != 0 else 0
+        x_start = x0 + start_ratio * (x1 - x0)
+        y_start = y0 + start_ratio * (y1 - y0)
+        z_val = -ld['q'] * scaling
+        # Voor puntlast: marker
         fig.add_trace(go.Scatter3d(
-            x=[x], y=[y], z=[z],
+            x=[x_start], y=[y_start], z=[z_val],
             mode='markers',
             marker=dict(size=5, color='red'),
             name=f"Load {ld['balk']}",
-            showlegend=True
+            showlegend=False
         ), row=1, col=2)
 
     # === Layout ===
