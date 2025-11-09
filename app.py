@@ -9,13 +9,16 @@ st.title("Vergelijking Spanningen, Structuur en Belastingen")
 uploaded_file = st.file_uploader("Upload fundering_nieuwV3.txt", type=["txt"])
 
 if uploaded_file is not None:
-    # === Bestand lezen met fallback encoding ===
+
+    # ===========================
+    # Bestand lezen met fallback
+    # ===========================
     def read_file_with_fallback_encoding(file):
         encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1', 'windows-1252']
-        for encoding in encodings:
+        for enc in encodings:
             try:
-                lines = file.getvalue().decode(encoding).splitlines()
-                st.success(f"Bestand gelezen met encoding: {encoding}")
+                lines = file.getvalue().decode(enc).splitlines()
+                st.success(f"Bestand gelezen met encoding: {enc}")
                 return lines
             except UnicodeDecodeError:
                 continue
@@ -24,9 +27,10 @@ if uploaded_file is not None:
 
     lines = read_file_with_fallback_encoding(uploaded_file)
 
-    # === STRAMIENLIJNEN & BALKEN PARSEN ===
+    # ===========================
+    # STRAMIENLIJNEN PARSEN
+    # ===========================
     stramienlijnen = {}
-    balken = []
     in_stramien = False
     for line in lines:
         if "STRAMIENLIJNEN" in line:
@@ -41,6 +45,10 @@ if uploaded_file is not None:
                 x1, y1, x2, y2 = map(float, match.groups()[1:])
                 stramienlijnen[naam] = [(x1, y1), (x2, y2)]
 
+    # ===========================
+    # BALKEN PARSEN
+    # ===========================
+    balken = []
     in_balken = False
     for line in lines:
         if "BALKEN" in line and "vervolg" not in line:
@@ -53,7 +61,9 @@ if uploaded_file is not None:
             if match:
                 balken.append((match.group(1), match.group(2)))
 
-    # === COORDINATEN FUNCTIES ===
+    # ===========================
+    # Functies voor coördinaten
+    # ===========================
     def get_beam_coord(code):
         lijn_naam, pos_str = code.split(';')
         i = int(pos_str)
@@ -66,7 +76,9 @@ if uploaded_file is not None:
         x, y = get_beam_coord(code)
         return (x, y, 0)
 
-    # === GROUND STRESS PARSEN ===
+    # ===========================
+    # GROUND STRESS PARSEN
+    # ===========================
     ground_stress_data = {}
 
     def parse_ground_stress():
@@ -93,7 +105,9 @@ if uploaded_file is not None:
 
     parse_ground_stress()
 
-    # === LOAD CASES PARSEN ===
+    # ===========================
+    # LOAD CASES PARSEN
+    # ===========================
     load_cases = {}
     current_bg = None
     in_loads = False
@@ -117,17 +131,18 @@ if uploaded_file is not None:
                 lengte = float(m.group(5))
                 load_cases[current_bg].append({'balk': balk_code, 'q': q, 'afstand': afstand, 'lengte': lengte})
 
-    # === Load case selectie ===
     selected_bg = st.selectbox("Selecteer Load Case (B.G.)", list(load_cases.keys()))
 
-    # === 3D PLOT ===
+    # ===========================
+    # 3D PLOT OPSTELLEN
+    # ===========================
     fig = make_subplots(
         rows=1, cols=2,
         specs=[[{"type": "scene"}, {"type": "scene"}]],
         subplot_titles=("Ground Stress", "Structuur & Loads")
     )
 
-    # === Ground Stress ===
+    # --- Ground Stress ---
     beam_colors = ['#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3', '#54A0FF', '#5F27CD', '#00D2D3']
     beams_data = {}
     for d in ground_stress_data.values():
@@ -148,7 +163,7 @@ if uploaded_file is not None:
             showlegend=True
         ), row=1, col=1)
 
-    # === Structuurplot ===
+    # --- Structuurplot ---
     for i, (b_start, b_end) in enumerate(balken):
         x0, y0, z0 = get_coord_3d(b_start)
         x1, y1, z1 = get_coord_3d(b_end)
@@ -160,21 +175,21 @@ if uploaded_file is not None:
             showlegend=True
         ), row=1, col=2)
 
-    # === Loads toevoegen als echte q-lasten ===
-    scaling = 0.05  # verminder hoogte zodat plot overzichtelijk blijft
+    # --- Belastingen tekenen (q-lasten & puntlasten) ---
+    scaling = 0.05
     for ld in load_cases[selected_bg]:
         balk_idx = int(ld['balk'].split(':')[0]) - 1
         b_start, b_end = balken[balk_idx]
         x0, y0 = get_beam_coord(b_start)
         x1, y1 = get_beam_coord(b_end)
 
-        # verdeelde last over de lengte
-        last_len = ld['lengte'] if ld['lengte'] != 0 else 0.1
-        start_ratio = ld['afstand'] / last_len if last_len != 0 else 0
-        # paar punten over de lengte
-        n_points = 5
-        x_vals = [x0 + (start_ratio + i/n_points) * (x1-x0) for i in range(n_points+1)]
-        y_vals = [y0 + (start_ratio + i/n_points) * (y1-y0) for i in range(n_points+1)]
+        last_start = ld['afstand']
+        last_end = last_start + ld['lengte'] if ld['lengte'] != 0 else last_start + 0.01
+
+        # 20 punten over de last
+        n_points = 20
+        x_vals = [x0 + ((last_start + i*(last_end-last_start)/n_points)/ld['lengte']) * (x1-x0) for i in range(n_points+1)]
+        y_vals = [y0 + ((last_start + i*(last_end-last_start)/n_points)/ld['lengte']) * (y1-y0) for i in range(n_points+1)]
         z_vals = [-ld['q']*scaling]*len(x_vals)
 
         fig.add_trace(go.Scatter3d(
@@ -185,7 +200,9 @@ if uploaded_file is not None:
             showlegend=False
         ), row=1, col=2)
 
-    # === Layout ===
+    # ===========================
+    # Layout
+    # ===========================
     shared_camera = dict(eye=dict(x=1.4, y=1.4, z=1.2))
     fig.update_layout(
         height=700, width=1400,
