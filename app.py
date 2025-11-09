@@ -99,7 +99,6 @@ if uploaded_file is not None:
     in_loads = False
     for line in lines:
         if line.startswith("VELDBELASTINGEN"):
-            # Bijvoorbeeld: VELDBELASTINGEN  B.G:1 Permanent
             m = re.match(r"VELDBELASTINGEN\s+B\.G:(\d+)", line)
             if m:
                 current_bg = f"BG{m.group(1)}"
@@ -110,7 +109,6 @@ if uploaded_file is not None:
             in_loads = False
             current_bg = None
         if in_loads and current_bg:
-            # Parse balk last regel
             m = re.match(r"Balk (\d+:\d+)\s+\d+\s+\S+\s+([-\d.]+)\s+([-\d.]*)\s+([-\d.]+)\s+([-\d.]+)", line)
             if m:
                 balk_code = m.group(1)
@@ -162,23 +160,27 @@ if uploaded_file is not None:
             showlegend=True
         ), row=1, col=2)
 
-    # === Loads toevoegen als lijnen ===
-    scaling = 0.1  # schaalfactor voor z
+    # === Loads toevoegen als echte q-lasten ===
+    scaling = 0.05  # verminder hoogte zodat plot overzichtelijk blijft
     for ld in load_cases[selected_bg]:
         balk_idx = int(ld['balk'].split(':')[0]) - 1
         b_start, b_end = balken[balk_idx]
         x0, y0 = get_beam_coord(b_start)
         x1, y1 = get_beam_coord(b_end)
-        # Zet start en eind van last over balk
-        start_ratio = ld['afstand'] / ld['lengte'] if ld['lengte'] != 0 else 0
-        x_start = x0 + start_ratio * (x1 - x0)
-        y_start = y0 + start_ratio * (y1 - y0)
-        z_val = -ld['q'] * scaling
-        # Voor puntlast: marker
+
+        # verdeelde last over de lengte
+        last_len = ld['lengte'] if ld['lengte'] != 0 else 0.1
+        start_ratio = ld['afstand'] / last_len if last_len != 0 else 0
+        # paar punten over de lengte
+        n_points = 5
+        x_vals = [x0 + (start_ratio + i/n_points) * (x1-x0) for i in range(n_points+1)]
+        y_vals = [y0 + (start_ratio + i/n_points) * (y1-y0) for i in range(n_points+1)]
+        z_vals = [-ld['q']*scaling]*len(x_vals)
+
         fig.add_trace(go.Scatter3d(
-            x=[x_start], y=[y_start], z=[z_val],
-            mode='markers',
-            marker=dict(size=5, color='red'),
+            x=x_vals, y=y_vals, z=z_vals,
+            mode='lines',
+            line=dict(color='red', width=6),
             name=f"Load {ld['balk']}",
             showlegend=False
         ), row=1, col=2)
