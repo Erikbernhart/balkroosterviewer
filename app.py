@@ -634,8 +634,6 @@ else:
     
     st.markdown("""
     ### Expected File Format
-    The application expects a text file containing foundation analysis data with sections for:
-    - **STRAMIENLIJNEN** (Grid lines)
-    - **BALKEN** (Beams)
-    - **VELDBELASTINGEN** (Load cases)
-    - **TUSSENPUNTEN VERPLAATSINGEN** (
+    The application expects a text file containing:
+    - **STRAMIENLIJNEN
+
