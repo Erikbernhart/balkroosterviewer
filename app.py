@@ -2,7 +2,6 @@ import streamlit as st
 import re
 import plotly.graph_objects as go
 import numpy as np
-from io import StringIO
 
 st.set_page_config(page_title="Foundation Beam Analysis", layout="wide")
 
@@ -77,6 +76,63 @@ if uploaded_file is not None:
                     eind = match.group(2)
                     balken.append((begin, eind))
         
+        # === HELPER FUNCTIONS ===
+        def get_beam_coord(code):
+            lijn_naam, pos_str = code.split(';')
+            i = int(pos_str)
+            
+            if lijn_naam not in stramienlijnen:
+                raise ValueError(f"Stramienlijn {lijn_naam} niet gevonden")
+            
+            p1, p2 = stramienlijnen[lijn_naam]
+            x = p1[0] + (i - 1) * (p2[0] - p1[0]) / 3
+            y = p1[1] + (i - 1) * (p2[1] - p1[1]) / 3
+            return (x, y)
+        
+        def get_beam_length(beam_num):
+            in_sections = False
+            for line in lines:
+                if "DOORSNEDESECTOREN" in line:
+                    in_sections = True
+                    continue
+                if in_sections and line.strip():
+                    match = re.match(rf"Balk\s+{beam_num}:\d+\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)", line)
+                    if match:
+                        return float(match.group(3))
+            return 0
+        
+        def get_coord_3d(code):
+            lijn_naam, pos_str = code.split(';')
+            i = int(pos_str)
+            
+            if lijn_naam not in stramienlijnen:
+                raise ValueError(f"Stramienlijn {lijn_naam} niet gevonden")
+            
+            p1, p2 = stramienlijnen[lijn_naam]
+            x = p1[0] + (i - 1) * (p2[0] - p1[0]) / 3
+            y = p1[1] + (i - 1) * (p2[1] - p1[1]) / 3
+            z = 0.0
+            
+            return (x, y, z)
+        
+        def get_beam_3d_coords(beam_num, position):
+            if beam_num > len(balken):
+                return None
+            
+            beam_start, beam_end = balken[beam_num - 1]
+            start_coord = get_beam_coord(beam_start)
+            end_coord = get_beam_coord(beam_end)
+            
+            beam_length = get_beam_length(beam_num)
+            if beam_length <= 0:
+                return None
+            
+            ratio = position / beam_length
+            x = start_coord[0] + ratio * (end_coord[0] - start_coord[0])
+            y = start_coord[1] + ratio * (end_coord[1] - start_coord[1])
+            
+            return (x, y, 0.0)
+        
         # === PARSE LOAD CASES ===
         def parse_load_cases():
             in_loads_section = False
@@ -130,30 +186,6 @@ if uploaded_file is not None:
         parse_load_cases()
         
         # === PARSE GROUND STRESS ===
-        def get_beam_coord(code):
-            lijn_naam, pos_str = code.split(';')
-            i = int(pos_str)
-            
-            if lijn_naam not in stramienlijnen:
-                raise ValueError(f"Stramienlijn {lijn_naam} niet gevonden")
-            
-            p1, p2 = stramienlijnen[lijn_naam]
-            x = p1[0] + (i - 1) * (p2[0] - p1[0]) / 3
-            y = p1[1] + (i - 1) * (p2[1] - p1[1]) / 3
-            return (x, y)
-        
-        def get_beam_length(beam_num):
-            in_sections = False
-            for line in lines:
-                if "DOORSNEDESECTOREN" in line:
-                    in_sections = True
-                    continue
-                if in_sections and line.strip():
-                    match = re.match(rf"Balk\s+{beam_num}:\d+\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)", line)
-                    if match:
-                        return float(match.group(3))
-            return 0
-        
         def parse_ground_stress():
             in_displacement_section = False
             
@@ -196,39 +228,6 @@ if uploaded_file is not None:
                                 continue
         
         parse_ground_stress()
-        
-        # === HELPER FUNCTIONS ===
-        def get_coord_3d(code):
-            lijn_naam, pos_str = code.split(';')
-            i = int(pos_str)
-            
-            if lijn_naam not in stramienlijnen:
-                raise ValueError(f"Stramienlijn {lijn_naam} niet gevonden")
-            
-            p1, p2 = stramienlijnen[lijn_naam]
-            x = p1[0] + (i - 1) * (p2[0] - p1[0]) / 3
-            y = p1[1] + (i - 1) * (p2[1] - p1[1]) / 3
-            z = 0.0
-            
-            return (x, y, z)
-        
-        def get_beam_3d_coords(beam_num, position):
-            if beam_num > len(balken):
-                return None
-            
-            beam_start, beam_end = balken[beam_num - 1]
-            start_coord = get_beam_coord(beam_start)
-            end_coord = get_beam_coord(beam_end)
-            
-            beam_length = get_beam_length(beam_num)
-            if beam_length <= 0:
-                return None
-            
-            ratio = position / beam_length
-            x = start_coord[0] + ratio * (end_coord[0] - start_coord[0])
-            y = start_coord[1] + ratio * (end_coord[1] - start_coord[1])
-            
-            return (x, y, 0.0)
         
         # === VISUALIZATION FUNCTIONS ===
         def create_ground_stress_plot():
@@ -474,7 +473,6 @@ if uploaded_file is not None:
                     elif load['type'] == 'distributed':
                         start_pos = load['start']
                         end_pos = start_pos + load['length']
-                        q_avg = (abs(load['q1']) + abs(load['q2'])) / 2
                         
                         n_arrows = max(3, int(load['length'] / 0.5))
                         positions = np.linspace(start_pos, end_pos, n_arrows)
@@ -636,5 +634,8 @@ else:
     
     st.markdown("""
     ### Expected File Format
-    The application expects a text file containing:
-    - **STRAMIENLIJNEN
+    The application expects a text file containing foundation analysis data with sections for:
+    - **STRAMIENLIJNEN** (Grid lines)
+    - **BALKEN** (Beams)
+    - **VELDBELASTINGEN** (Load cases)
+    - **TUSSENPUNTEN VERPLAATSINGEN** (
