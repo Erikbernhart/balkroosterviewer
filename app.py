@@ -45,6 +45,8 @@ if uploaded_file is not None:
         
         # === PARSE STRAMIENLIJNEN ===
         in_stramien = False
+        node_positions = {}  # Store specific node positions if defined
+        
         for line in lines:
             if "STRAMIENLIJNEN" in line:
                 in_stramien = True
@@ -98,13 +100,25 @@ if uploaded_file is not None:
             
             p1, p2 = stramienlijnen[lijn_naam]
             
-            # Use the max position for this line to determine the division
-            # Default to 3 divisions (4 positions) if not found
-            max_pos = max_positions.get(lijn_naam, 4)
-            divisions = max_pos - 1
+            # Calculate the line length
+            line_length = ((p2[0] - p1[0])**2 + (p2[1] - p1[1])**2)**0.5
             
-            x = p1[0] + (i - 1) * (p2[0] - p1[0]) / divisions
-            y = p1[1] + (i - 1) * (p2[1] - p1[1]) / divisions
+            # Assume positions are in meters along the line
+            # Position 1 might be at 0m, position 5 at some distance, etc.
+            # If max_positions is available, use that for interpolation
+            # Otherwise, treat position numbers as relative distances
+            
+            if lijn_naam in max_positions and max_positions[lijn_naam] > 1:
+                # Use max position to determine divisions
+                divisions = max_positions[lijn_naam] - 1
+                ratio = (i - 1) / divisions
+            else:
+                # Fallback: assume position number represents meters or equal divisions
+                # This needs to be adjusted based on your actual data format
+                ratio = (i - 1) / 3  # Default to 4 positions
+            
+            x = p1[0] + ratio * (p2[0] - p1[0])
+            y = p1[1] + ratio * (p2[1] - p1[1])
             return (x, y)
         
         def get_beam_length(beam_num):
