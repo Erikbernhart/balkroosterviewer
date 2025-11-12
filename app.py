@@ -115,23 +115,20 @@ if uploaded_file is not None:
             
             return (x, y, z)
         
-        def get_beam_3d_coords(beam_num, position):
-            if beam_num > len(balken):
-                return None
+        def get_beam_coord(code):
+            lijn_naam, pos_str = code.split(';')
+            i = int(pos_str)
             
-            beam_start, beam_end = balken[beam_num - 1]
-            start_coord = get_beam_coord(beam_start)
-            end_coord = get_beam_coord(beam_end)
+            if lijn_naam not in stramienlijnen:
+                raise ValueError(f"Stramienlijn {lijn_naam} niet gevonden")
             
-            beam_length = get_beam_length(beam_num)
-            if beam_length <= 0:
-                return None
-            
-            ratio = position / beam_length
-            x = start_coord[0] + ratio * (end_coord[0] - start_coord[0])
-            y = start_coord[1] + ratio * (end_coord[1] - start_coord[1])
-            
-            return (x, y, 0.0)
+            p1, p2 = stramienlijnen[lijn_naam]
+            # Directly use the position index to find the coordinate
+            # Position 1 = start, position 2,3,4... = interpolated positions along the line
+            # For a line like A: from (0, 13.4) to (0, 0), position should interpolate correctly
+            x = p1[0] + (i - 1) * (p2[0] - p1[0]) / 3
+            y = p1[1] + (i - 1) * (p2[1] - p1[1]) / 3
+            return (x, y)
         
         # === PARSE LOAD CASES ===
         def parse_load_cases():
@@ -637,4 +634,5 @@ else:
     The application expects a text file containing:
     - **STRAMIENLIJNEN
 """)
+
 
